@@ -46,6 +46,8 @@ Input: the show *Syntax - Tasty Web Development Treats*, past sponsor *DigitalOc
 
 Results change as Qloo data changes; the table describes one run on 2026-10-15.
 
+A small show works the same way. *The Bike Shed*, a developer podcast with no strong age or gender skew in Qloo, got IFTTT, Evernote, Dropbox, DuckDuckGo, ProtonMail, Brave and Codecademy on the same day. With the focus "skip payments and fintech", the run for *Syntax* above kept Stripe and Square out of the shortlist and said so.
+
 ## What makes it Qloo-powered
 
 Without Qloo the model can only recall brands that sponsor famous shows. With Qloo the agent works from measured audience overlap: it sees which brands this specific audience over-indexes on, how strongly, and what Qloo knows about each brand (type, business model, markets, target age). Every brand on the shortlist is one Qloo returned for this show, and the numbers on each card are Qloo's. The comparison panel on the page shows the difference for any show: the model-only list next to the Qloo-backed one.
