@@ -62,6 +62,24 @@
         <h2>Left out on purpose</h2>
         <ul id="skipped-list"></ul>
       </div>
+      <div id="compare" class="card compare">
+        <h2>With and without Qloo</h2>
+        <button id="compare-go" type="button" class="secondary">Compare with a guess made without Qloo</button>
+        <p id="compare-status" class="status" hidden></p>
+        <div id="compare-body" hidden>
+          <p class="compare-why">The model-only list is what a chatbot remembers about podcast sponsorships, so for a well-known show it mostly names brands that already advertise there. The Qloo list comes from measured audience overlap: brands this show's listeners over-index on, whether or not they buy podcast ads today. <strong id="compare-count"></strong></p>
+          <div class="columns">
+            <div>
+              <h3>With Qloo: this shortlist</h3>
+              <ul id="compare-qloo" class="compare-list"></ul>
+            </div>
+            <div>
+              <h3>Without Qloo: model only</h3>
+              <ul id="compare-guess" class="compare-list"></ul>
+            </div>
+          </div>
+        </div>
+      </div>
       <p class="fineprint">Affinity comes from Qloo and describes how strongly this show's audience, as a group, over-indexes on a brand. It is not a prediction about any listener and does not mean the brand buys podcast ads. Scores and ranks are copied from Qloo; the reasons and pitch angles are written by the language model from that evidence.</p>
     </section>
   </main>

@@ -46,10 +46,14 @@ input[type=text]:focus { outline: 2px solid var(--accent); outline-offset: 1px; 
 .list li { padding: 8px 10px; border-radius: 8px; cursor: pointer; }
 .list li[aria-selected=true], .list li:hover { background: var(--accent-soft); }
 .list .tags { display: block; color: var(--muted); font-size: 13px; }
+.list li.empty { cursor: default; color: var(--muted); }
+.list li.empty:hover { background: none; }
 .actions { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 button { font: inherit; }
 #go { background: var(--accent); color: #fff; border: 0; border-radius: 10px; padding: 10px 20px; font-weight: 600; cursor: pointer; }
 #go:disabled { opacity: .5; cursor: not-allowed; }
+.secondary { background: none; color: var(--accent); border: 1px solid var(--accent); border-radius: 10px; padding: 10px 16px; font-weight: 600; cursor: pointer; }
+.secondary:disabled { opacity: .5; cursor: wait; }
 .examples { color: var(--muted); font-size: 14px; }
 .link { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; text-decoration: underline; font-size: 14px; }
 .steps { margin: 0; padding: 0; list-style: none; }
@@ -64,11 +68,11 @@ button { font: inherit; }
 .group h2 { margin: 24px 0 0; }
 .picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
 .pick { display: flex; flex-direction: column; margin: 12px 0 0; }
-.pick header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
-.pick h3 { margin: 0; font-size: 18px; }
+.pick header { display: flex; flex-direction: column; gap: 6px; }
+.pick h3 { margin: 0; font-size: 18px; min-width: 0; overflow-wrap: anywhere; }
 .pick h3 a { color: var(--text); text-decoration: none; }
 .pick h3 a[href]:hover { text-decoration: underline; }
-.score { flex: 0 0 130px; text-align: right; font-size: 13px; color: var(--muted); }
+.score { font-size: 13px; color: var(--muted); }
 .bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin-bottom: 3px; }
 .bar span { display: block; height: 100%; background: var(--accent); }
 .why { margin: 10px 0 6px; }
@@ -78,5 +82,15 @@ button { font: inherit; }
 .copy:hover { border-color: var(--accent); }
 .note { border-left: 4px solid var(--warn); }
 .skipped ul { margin: 0; padding-left: 20px; }
+.compare-why { margin: 0 0 12px; color: var(--muted); }
+.compare-why strong { color: var(--text); }
+.columns { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 680px) { .columns { grid-template-columns: 1fr; } }
+.compare h3 { font-size: 16px; margin: 0 0 6px; }
+.compare-list { margin: 0; padding: 0; list-style: none; }
+.compare-list li { padding: 6px 8px; border-radius: 8px; }
+.compare-list li.both { background: var(--accent-soft); }
+.compare-list .sub { display: block; color: var(--muted); font-size: 14px; }
+.both-tag { font-size: 12px; font-weight: 600; color: var(--accent); white-space: nowrap; }
 .fineprint { color: var(--muted); font-size: 13px; margin: 24px 0; }
 .foot { color: var(--muted); font-size: 14px; padding: 24px 0 40px; }

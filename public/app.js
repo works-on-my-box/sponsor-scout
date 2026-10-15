@@ -1,6 +1,8 @@
 // Sponsor Scout front end: podcast search, live agent steps over SSE, shortlist rendering.
+import { brandKey, sharedKeys } from './compare.js';
+
 const $ = (id) => document.getElementById(id);
-const state = { podcast: null, results: [], active: -1, timer: 0, running: false };
+const state = { podcast: null, results: [], active: -1, timer: 0, running: false, message: '', result: null };
 
 const input = $('podcast');
 const list = $('podcast-list');
@@ -37,7 +39,16 @@ function renderList() {
       return li;
     }),
   );
-  list.hidden = state.results.length === 0;
+  if (!state.results.length && state.message) {
+    // A disabled line that says why the list is empty; it cannot be chosen.
+    const li = document.createElement('li');
+    li.className = 'empty';
+    li.role = 'option';
+    li.setAttribute('aria-disabled', 'true');
+    li.textContent = state.message;
+    list.append(li);
+  }
+  list.hidden = !list.children.length;
   input.setAttribute('aria-expanded', String(!list.hidden));
 }
 
@@ -50,11 +61,23 @@ function choose(i) {
 }
 
 async function search(q) {
-  const res = await fetch(`/api/podcasts?q=${encodeURIComponent(q)}`);
-  const data = await res.json().catch(() => ({}));
+  let data = {};
+  let failed = false;
+  try {
+    const res = await fetch(`/api/podcasts?q=${encodeURIComponent(q)}`);
+    data = await res.json().catch(() => ({}));
+    failed = !res.ok;
+  } catch {
+    failed = true;
+  }
   if (input.value.trim() !== q) return [];
   state.results = Array.isArray(data.results) ? data.results : [];
   state.active = state.results.length ? 0 : -1;
+  state.message = failed
+    ? data.error || 'Search is not answering. Check your connection and try again.'
+    : !state.results.length && q.length >= 3
+      ? `No show called “${q}” in Qloo. Try the exact title.`
+      : '';
   renderList();
   return state.results;
 }
@@ -67,7 +90,7 @@ input.addEventListener('input', () => {
   state.timer = setTimeout(() => search(q), 300);
 });
 input.addEventListener('keydown', (e) => {
-  if (list.hidden) return;
+  if (list.hidden || (!state.results.length && e.key !== 'Escape')) return;
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
     e.preventDefault();
     const n = state.results.length;
@@ -105,6 +128,8 @@ function chip(text) {
   c.textContent = text;
   return c;
 }
+
+const scoreLabel = (e) => `affinity ${e.affinity.toFixed(2)} · #${e.rank} of ${e.of}${e.list === 'look-alike' ? ' look-alikes' : ''}`;
 
 function outreachNote(pick, result) {
   return [
@@ -155,7 +180,7 @@ function renderResult(r) {
         a.textContent = p.brand;
         if (/^https?:\/\//.test(p.evidence.site)) a.href = p.evidence.site;
         card.querySelector('.bar span').style.width = `${Math.round(p.evidence.affinity * 100)}%`;
-        card.querySelector('.value').textContent = `affinity ${p.evidence.affinity.toFixed(2)} · #${p.evidence.rank} of ${p.evidence.of}${p.evidence.list === 'look-alike' ? ' look-alikes' : ''}`;
+        card.querySelector('.value').textContent = scoreLabel(p.evidence);
         card.querySelector('.why').textContent = p.why;
         const angle = card.querySelector('.angle');
         if (p.pitchAngle) angle.querySelector('span').textContent = p.pitchAngle;
@@ -186,8 +211,71 @@ function renderResult(r) {
       return li;
     }),
   );
+  state.result = r;
+  $('compare').hidden = !r.picks.length;
+  $('compare-go').hidden = false;
+  $('compare-status').hidden = true;
+  $('compare-body').hidden = true;
   $('result').hidden = false;
 }
+
+function compareItem(name, sub, both) {
+  const li = document.createElement('li');
+  li.classList.toggle('both', both);
+  const b = document.createElement('strong');
+  b.textContent = name;
+  li.append(b);
+  if (both) {
+    const tag = document.createElement('span');
+    tag.className = 'both-tag';
+    tag.textContent = 'in both lists';
+    li.append(' ', tag);
+  }
+  const s = document.createElement('span');
+  s.className = 'sub';
+  s.textContent = sub;
+  li.append(s);
+  return li;
+}
+
+function renderCompare(r, guesses) {
+  const shared = sharedKeys(r.picks.map((p) => p.brand), guesses.map((g) => g.brand));
+  $('compare-qloo').replaceChildren(...r.picks.map((p) => compareItem(p.brand, scoreLabel(p.evidence), shared.has(brandKey(p.brand)))));
+  $('compare-guess').replaceChildren(...guesses.map((g) => compareItem(g.brand, g.reason, shared.has(brandKey(g.brand)))));
+  const n = shared.size;
+  $('compare-count').textContent = n ? `${n} brand${n === 1 ? ' appears' : 's appear'} in both lists.` : 'No brand appears in both lists.';
+  $('compare-body').hidden = false;
+}
+
+// The same model, given only the show name: shows what Qloo adds to the shortlist.
+async function compare() {
+  const r = state.result;
+  const go = $('compare-go');
+  const status = $('compare-status');
+  go.disabled = true;
+  status.className = 'status';
+  status.textContent = 'Asking the same model with only the show name, no Qloo data…';
+  status.hidden = false;
+  let data = {};
+  try {
+    const res = await fetch('/api/baseline', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ podcastName: r.podcast.name }) });
+    data = await res.json().catch(() => ({}));
+  } catch {
+    data = { error: 'Could not reach the server. Try again in a minute.' };
+  }
+  go.disabled = false;
+  if (state.result !== r) return;
+  if (!Array.isArray(data.sponsors)) {
+    status.className = 'status error';
+    status.textContent = data.error || 'The guess without Qloo did not load. Try again in a minute.';
+    return;
+  }
+  status.hidden = true;
+  go.hidden = true;
+  renderCompare(r, data.sponsors);
+}
+
+$('compare-go').addEventListener('click', compare);
 
 async function run(body) {
   state.running = true;
@@ -226,6 +314,7 @@ async function run(body) {
         } else if (event === 'error') throw new Error(data.message);
       }
     }
+    if (!done) throw new Error('The connection dropped before the result arrived. Try again.');
   } catch (e) {
     status.className = 'status error';
     status.textContent = e.message || 'Something went wrong.';

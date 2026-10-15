@@ -10,7 +10,7 @@ import {
   searchBrands,
   isLikelyAdvertiser,
 } from './qloo';
-import { generate, GeminiContent, GeminiPart, GeminiUnavailable } from './gemini';
+import { generate, parseJsonAnswer, GeminiContent, GeminiPart, GeminiUnavailable } from './gemini';
 
 export interface ScoutInput {
   podcastId: string;
@@ -51,6 +51,8 @@ export interface ScoutResult {
   mode: 'agent' | 'fallback';
   model?: string;
   notes: string[];
+  // Set when a check that should have run did not (the result is shown but not cached).
+  incomplete?: boolean;
 }
 
 export interface Step {
@@ -184,6 +186,7 @@ interface Seen {
 interface RunState {
   seen: Map<string, Seen>;
   past?: { ids: string[]; found: string[]; missing: string[] };
+  incomplete?: boolean;
   audience?: { summary: string; skews: string[] };
   podcastOnly?: BrandHit[];
   notes: string[];
@@ -206,7 +209,7 @@ function toEvidence(s: Seen): Evidence {
   };
 }
 
-const clip = (v: unknown, n: number) => (typeof v === 'string' ? v.trim().slice(0, n) : '');
+export const clip = (v: unknown, n: number) => (typeof v === 'string' ? v.trim().slice(0, n) : '');
 
 // Keeps only picks that point at brands Qloo actually returned in this run; drops duplicates.
 export function validatePicks(raw: unknown, state: Pick<RunState, 'seen' | 'past'>): { picks: SponsorPick[]; dropped: number } {
@@ -234,6 +237,81 @@ export function validatePicks(raw: unknown, state: Pick<RunState, 'seen' | 'past
     if (picks.length === 10) break;
   }
   return { picks, dropped };
+}
+
+// Drops the picks the focus check says the host's focus excludes. A verdict counts only if it names a kind
+// the check itself listed as excluded and points at a pick on the shortlist.
+export function applyFocusCheck(picks: SponsorPick[], answer: unknown, focus: string) {
+  const a = answer as any;
+  const kinds = new Set((Array.isArray(a?.focus_excludes) ? a.focus_excludes : []).map((k: unknown) => clip(k, 80).toLowerCase()).filter(Boolean));
+  const reasons = new Map<string, string>();
+  for (const b of (Array.isArray(a?.brands) ? a.brands : []) as any[]) {
+    const id = clip(b?.brand_id, 64);
+    if (kinds.has(clip(b?.excluded_kind, 80).toLowerCase()) && !reasons.has(id) && picks.some((p) => p.brandId === id)) reasons.set(id, clip(b?.main_business, 80));
+  }
+  const removed = picks.filter((p) => reasons.has(p.brandId)).map((p) => ({ brand: p.brand, reason: reasons.get(p.brandId) ?? '' }));
+  if (!removed.length) return { picks, removed, notes: [] as string[] };
+  const kept = picks.filter((p) => !reasons.has(p.brandId));
+  const notes = [`Removed ${removed.map((r) => r.brand).join(', ')}: your focus says “${focus}”.`];
+  if (kept.length < 3) notes.push(`Picks left after applying your focus: ${kept.length} of ${picks.length}. Try a broader focus for a longer list.`);
+  return { picks: kept, removed, notes };
+}
+
+// Per-brand verdicts, each grounded in what the brand sells: a plain "list the violators" answer over-flagged
+// unrelated brands in tests. propertyOrdering makes the model write the grounding before the verdict.
+const FOCUS_SCHEMA = {
+  type: 'object',
+  properties: {
+    focus_excludes: { type: 'array', items: { type: 'string' } },
+    brands: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: { brand_id: { type: 'string' }, main_business: { type: 'string' }, excluded_kind: { type: 'string' } },
+        required: ['brand_id', 'main_business', 'excluded_kind'],
+        propertyOrdering: ['brand_id', 'main_business', 'excluded_kind'],
+      },
+    },
+  },
+  required: ['focus_excludes', 'brands'],
+  propertyOrdering: ['focus_excludes', 'brands'],
+};
+
+// The focus check: one call, no tools, JSON output, temperature 0.
+export const focusCheckRequest = (focus: string, picks: SponsorPick[]) => ({
+  contents: [
+    {
+      role: 'user',
+      parts: [
+        {
+          text: `A podcast host wants sponsor ideas and wrote this focus: "${focus}".
+1. focus_excludes: the kinds of brands the focus explicitly asks to leave out, a few words each. "skip payments" leaves out payments companies, "no crypto" leaves out crypto companies, "avoid gambling" leaves out betting brands. Words such as "only", "prefer" or "more" say what the host wants more of and leave nothing out. Empty if the focus asks to leave nothing out.
+2. brands: for every brand below, main_business in a few words (from the facts given and common knowledge), then excluded_kind: the item of focus_excludes that this main business is, copied exactly, or "" if it is none of them. A brand that is merely unrelated to the focus gets "".
+Brands: ${JSON.stringify(picks.map((p) => ({ brand_id: p.brandId, name: p.brand, industries: p.evidence.industries.slice(0, 4), brand_type: p.evidence.brandType.slice(0, 2) })))}`,
+        },
+      ],
+    },
+  ],
+  generationConfig: { temperature: 0, responseMimeType: 'application/json', responseSchema: FOCUS_SCHEMA },
+});
+
+// The agent sometimes keeps brands the host's focus rules out, so one tool-free call double-checks the picks.
+// If that call fails, the picks stay as they are and no note is added.
+async function respectFocus(env: Env, focus: string, picks: SponsorPick[], startAt: number, state: RunState, emit: Emit): Promise<SponsorPick[]> {
+  let answer: unknown;
+  try {
+    answer = parseJsonAnswer((await generate(env, focusCheckRequest(focus, picks), startAt)).content);
+  } catch (e) {
+    console.error('focus check skipped', e instanceof Error ? e.message : e);
+    state.incomplete = true;
+    state.notes.push('The list could not be double-checked against your focus this time. Review it before you use it.');
+    return picks;
+  }
+  const checked = applyFocusCheck(picks, answer, focus);
+  state.notes.push(...checked.notes);
+  const removed = checked.removed.map((r) => (r.reason ? `${r.brand} (${r.reason})` : r.brand));
+  await emit('step', { tool: 'check_focus', label: 'Checked the picks against your focus', detail: removed.length ? `removed ${removed.join(', ')}` : 'nothing to remove' });
+  return checked.picks;
 }
 
 // Deterministic shortlist used when the language model is unavailable: Qloo ranking plus brand facts.
@@ -375,6 +453,7 @@ export async function runScout(env: Env, input: ScoutInput, emit: Emit): Promise
           if (dropped) state.notes.push(`${dropped} pick(s) from the model were dropped because Qloo did not return them in this run.`);
           if (picks.length >= 3) {
             await emit('step', { tool: fc.name, label: 'Wrote the shortlist', detail: `${picks.length} sponsors in ${new Set(picks.map((p) => p.category)).size} categories` });
+            const final = input.focus ? await respectFocus(env, input.focus, picks, modelIndex, state, emit) : picks;
             const skipped = (Array.isArray(args.skipped) ? args.skipped : [])
               .slice(0, 4)
               .map((s: any) => ({ brand: clip(s?.brand_name, 60), reason: clip(s?.reason, 200) }))
@@ -382,11 +461,12 @@ export async function runScout(env: Env, input: ScoutInput, emit: Emit): Promise
             return {
               podcast,
               audience: state.audience ?? { summary: clip(args.audience_summary, 400), skews: [] },
-              picks,
+              picks: final,
               skipped,
               mode: 'agent',
               model,
               notes: state.notes,
+              incomplete: state.incomplete,
             };
           }
           responses.push({ functionResponse: { name: fc.name, id: fc.id, response: { error: 'Fewer than 3 picks matched brands returned by get_brand_affinities. Use brand_id values from those results.' } } });

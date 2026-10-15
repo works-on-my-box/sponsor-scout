@@ -1,6 +1,8 @@
 // Worker entry: static UI from ./public, JSON and server-sent-event API under /api.
 import { Env, searchPodcasts, QlooError } from './qloo';
 import { runScout, ScoutInput, ScoutResult, Step } from './agent';
+import { guessSponsors } from './baseline';
+import { GeminiUnavailable } from './gemini';
 
 const RESULT_TTL_SECONDS = 24 * 3600;
 const json = (data: unknown, status = 200) =>
@@ -54,7 +56,8 @@ function scout(req: Request, env: Env, ctx: ExecutionContext, body: unknown): Re
           await send(event, data);
         });
         await send('result', result);
-        if (env.CACHE && result.mode === 'agent') await env.CACHE.put(key, JSON.stringify({ steps, result }), { expirationTtl: RESULT_TTL_SECONDS });
+        if (env.CACHE && result.mode === 'agent' && !result.incomplete)
+          await env.CACHE.put(key, JSON.stringify({ steps, result }), { expirationTtl: RESULT_TTL_SECONDS });
       } catch (e) {
         console.error('scout failed', e instanceof Error ? e.message : e);
         await send('error', { message: publicMessage(e) });
@@ -66,6 +69,25 @@ function scout(req: Request, env: Env, ctx: ExecutionContext, body: unknown): Re
   return new Response(readable, {
     headers: { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache, no-transform' },
   });
+}
+
+// Model-only guess for the same show, shown next to the Qloo shortlist; cached like finished runs.
+async function baseline(env: Env, body: any): Promise<Response> {
+  const podcastName = typeof body?.podcastName === 'string' ? body.podcastName.trim().slice(0, 120) : '';
+  if (!podcastName) return json({ error: 'Pick a podcast first.' }, 400);
+  const key = `base:${podcastName.toLowerCase()}`;
+  try {
+    const cached = env.CACHE ? await env.CACHE.get(key, 'json') : null;
+    if (cached) return json(cached);
+    const result = await guessSponsors(env, podcastName);
+    if (env.CACHE) await env.CACHE.put(key, JSON.stringify(result), { expirationTtl: RESULT_TTL_SECONDS });
+    return json(result);
+  } catch (e) {
+    console.error('baseline failed', e instanceof Error ? e.message : e);
+    if (e instanceof GeminiUnavailable)
+      return json({ error: 'The language model is not available right now (most likely its free quota), so there is no guess without Qloo to compare. Try again in a few minutes.' }, 503);
+    return json({ error: publicMessage(e) }, 502);
+  }
 }
 
 export default {
@@ -81,8 +103,8 @@ export default {
         return json({ error: publicMessage(e) }, 502);
       }
     }
-    if (url.pathname === '/api/scout' && req.method === 'POST') {
-      // Each run spends free-tier model quota, so keep one visitor from draining it.
+    if ((url.pathname === '/api/scout' || url.pathname === '/api/baseline') && req.method === 'POST') {
+      // Each run or baseline spends free-tier model quota, so keep one visitor from draining it.
       const ip = req.headers.get('cf-connecting-ip') ?? 'local';
       if (env.LIMITER && !(await env.LIMITER.limit({ key: ip })).success)
         return json({ error: 'Too many runs from your address. Wait a minute and try again.' }, 429);
@@ -92,7 +114,7 @@ export default {
       } catch {
         return json({ error: 'Send JSON.' }, 400);
       }
-      return scout(req, env, ctx, body);
+      return url.pathname === '/api/scout' ? scout(req, env, ctx, body) : baseline(env, body);
     }
     if (url.pathname.startsWith('/api/')) return json({ error: 'Not found.' }, 404);
     return env.ASSETS.fetch(req);

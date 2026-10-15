@@ -17,6 +17,7 @@ show name ──► Qloo /search (podcast) ──► host picks the right show
                       │ get_brand_affinities  → Qloo /v2/insights (urn:entity:brand)  │
                       │                         + past sponsors as look-alike signals │
                       │ submit_shortlist      → picks are checked against Qloo data   │
+                      │ focus check           → drops picks the host's focus rules out │
                       └───────────────────────────────────────────────────────────────┘
                                              │
                                              ▼
@@ -27,7 +28,9 @@ show name ──► Qloo /search (podcast) ──► host picks the right show
 2. **Read the audience.** `get_audience_profile` calls `/v2/insights` with `filter.type=urn:demographics` and `signal.interests.entities=<show>`. The answer is how the audience over- or under-indexes on age groups and gender compared with the average Qloo audience.
 3. **Find brands the audience likes.** `get_brand_affinities` calls `/v2/insights` with `filter.type=urn:entity:brand`, the show as the signal, `take=50` and `feature.explainability=true`. If the host names past sponsors, they are resolved with `/search` (`types=urn:entity:brand`), added as extra signals to find look-alike advertisers, and excluded from the results with `filter.exclude.entities`. The tool drops brands whose Qloo `brand_type` is a media or nonprofit brand, and can narrow the list by industry.
 4. **Write the shortlist.** The agent calls `submit_shortlist` with 6 to 10 picks: brand id, category, why, pitch angle. The server keeps only picks whose ids Qloo returned during this run, removes past sponsors and duplicates, and attaches the evidence itself: affinity, rank, brand type, business model, key markets and target age come from Qloo, never from the model.
-5. **Show the run.** The page streams each agent step as it happens (server-sent events), then renders the shortlist. Each card can copy a short outreach note.
+5. **Respect the focus.** If the host wrote what to avoid ("skip payments", "no crypto"), one more model call in JSON mode states each pick's main business and whether it is one of the excluded kinds. The server removes those picks and the page says what it removed. Words like "only" or "prefer" steer the agent but remove nothing.
+6. **Show the run.** The page streams each agent step as it happens (server-sent events), then renders the shortlist. Each card can copy a short outreach note.
+7. **Compare with and without Qloo.** One click asks the same model for sponsors from the show's name alone, with no Qloo data, and puts the two lists side by side, marking brands that appear in both.
 
 If the language model is unavailable (free-tier quota, regional restriction), the run still finishes: the shortlist becomes the plain Qloo ranking of likely advertisers, without written reasons, and the page says so.
 
@@ -45,7 +48,7 @@ Results change as Qloo data changes; the table describes one run on 2026-10-15.
 
 ## What makes it Qloo-powered
 
-Without Qloo the model can only recall brands that sponsor famous shows. With Qloo the agent works from measured audience overlap: it sees which brands this specific audience over-indexes on, how strongly, and what Qloo knows about each brand (type, business model, markets, target age). Every brand on the shortlist is one Qloo returned for this show, and the numbers on each card are Qloo's.
+Without Qloo the model can only recall brands that sponsor famous shows. With Qloo the agent works from measured audience overlap: it sees which brands this specific audience over-indexes on, how strongly, and what Qloo knows about each brand (type, business model, markets, target age). Every brand on the shortlist is one Qloo returned for this show, and the numbers on each card are Qloo's. The comparison panel on the page shows the difference for any show: the model-only list next to the Qloo-backed one.
 
 ## Run it yourself
 
@@ -75,7 +78,7 @@ The API runs in a fixed US region (`placement` in `wrangler.jsonc`) because Gemi
 
 - **Keys stay on the server.** The browser talks only to `/api/*`; the Qloo and Gemini keys live in Worker secrets.
 - **Small requests, private cache.** Qloo answers are cached in Workers KV for seven days and finished runs for 24 hours, so repeated demos do not spend quota. Nothing from Qloo is stored in this repository; tests use synthetic data.
-- **Bounded cost.** Gemini 3.5 Flash-Lite with a fallback to 3.1 Flash-Lite, at most seven model turns per run, and a rate limit of four runs per minute per visitor.
+- **Bounded cost.** Gemini 3.5 Flash-Lite with a fallback to 3.1 Flash-Lite, at most seven model turns per run plus one focus check, and a rate limit of four runs or comparisons per minute per visitor. A run whose focus check could not run is shown with a note and not cached.
 
 ## Limitations
 

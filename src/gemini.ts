@@ -55,3 +55,8 @@ export async function generate(env: Env, body: Record<string, unknown>, startAt 
   }
   throw new GeminiUnavailable(last || 'no model available');
 }
+
+// Parses a JSON-mode answer (responseMimeType application/json); thought parts are skipped.
+export function parseJsonAnswer(content: GeminiContent): unknown {
+  return JSON.parse(content.parts.filter((p) => typeof p.text === 'string' && !p.thought).map((p) => p.text).join(''));
+}
