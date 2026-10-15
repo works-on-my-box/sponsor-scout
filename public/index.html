@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sponsor Scout</title>
+  <meta name="description" content="Find brand sponsors whose customers already listen to your podcast. An agent built on Qloo taste data.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='14' cy='14' r='9' fill='none' stroke='%235b5bd6' stroke-width='4'/%3E%3Cpath d='M21 21l7 7' stroke='%235b5bd6' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="wrap">
+      <a class="brand" href="/">Sponsor&nbsp;Scout</a>
+      <p class="tagline">Find brands whose customers already listen to your show.</p>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <form id="form" class="card form" autocomplete="off">
+      <label class="field">
+        <span class="label">Your podcast</span>
+        <div class="combo">
+          <input id="podcast" type="text" placeholder="Start typing a show name…" maxlength="80" required aria-autocomplete="list" aria-controls="podcast-list" aria-expanded="false">
+          <ul id="podcast-list" class="list" role="listbox" hidden></ul>
+        </div>
+        <span id="picked" class="hint">Pick your show from the list so the agent works on the right one.</span>
+      </label>
+      <div class="row">
+        <label class="field">
+          <span class="label">Past or current sponsors <em>optional</em></span>
+          <input id="sponsors" type="text" placeholder="e.g. DigitalOcean, Sentry" maxlength="190">
+          <span class="hint">Up to three, comma-separated. The agent looks for look-alikes.</span>
+        </label>
+        <label class="field">
+          <span class="label">Focus <em>optional</em></span>
+          <input id="focus" type="text" placeholder="e.g. B2B tools only, no crypto" maxlength="200">
+          <span class="hint">Anything the agent should prefer or avoid.</span>
+        </label>
+      </div>
+      <div class="actions">
+        <button id="go" type="submit" disabled>Find sponsors</button>
+        <span class="examples">Try: <button type="button" class="link" data-example="Syntax">Syntax</button> · <button type="button" class="link" data-example="Huberman Lab">Huberman Lab</button> · <button type="button" class="link" data-example="Smartless">SmartLess</button></span>
+      </div>
+    </form>
+
+    <section id="run" class="card run" hidden>
+      <h2>What the agent did</h2>
+      <ol id="steps" class="steps"></ol>
+      <p id="status" class="status"></p>
+    </section>
+
+    <section id="result" hidden>
+      <div class="card audience">
+        <h2>Who listens</h2>
+        <p id="audience-summary"></p>
+        <div id="audience-skews" class="chips"></div>
+      </div>
+      <div id="notes"></div>
+      <div id="groups"></div>
+      <div id="skipped" class="card skipped" hidden>
+        <h2>Left out on purpose</h2>
+        <ul id="skipped-list"></ul>
+      </div>
+      <p class="fineprint">Affinity comes from Qloo and describes how strongly this show's audience, as a group, over-indexes on a brand. It is not a prediction about any listener and does not mean the brand buys podcast ads. Scores and ranks are copied from Qloo; the reasons and pitch angles are written by the language model from that evidence.</p>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <div class="wrap">Built on <a href="https://www.qloo.com/" rel="noopener">Qloo</a> taste data and Gemini. Source: <a href="https://github.com/works-on-my-box/sponsor-scout" rel="noopener">GitHub</a>.</div>
+  </footer>
+
+  <template id="pick-tpl">
+    <article class="card pick">
+      <header>
+        <h3><a class="name" target="_blank" rel="noopener"></a></h3>
+        <div class="score"><div class="bar"><span></span></div><span class="value"></span></div>
+      </header>
+      <p class="why"></p>
+      <p class="angle"><strong>Pitch angle:</strong> <span></span></p>
+      <div class="chips facts"></div>
+      <button type="button" class="copy">Copy outreach note</button>
+    </article>
+  </template>
+
+  <script src="/app.js" type="module"></script>
+</body>
+</html>

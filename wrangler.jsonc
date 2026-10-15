@@ -1,0 +1,23 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "sponsor-scout",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  },
+  "kv_namespaces": [
+    { "binding": "CACHE", "id": "479c98b0e59a4b109b4a5c793f4391b0" }
+  ],
+  "ratelimits": [
+    { "name": "LIMITER", "namespace_id": "1001", "simple": { "limit": 4, "period": 60 } }
+  ],
+  "vars": {
+    "QLOO_BASE_URL": "https://hackathon.api.qloo.com"
+  },
+  // Gemini rejects requests from some Cloudflare locations (for example Hong Kong), so run the API next to Google in the US.
+  "placement": { "mode": "targeted", "region": "gcp:us-central1" },
+  "observability": { "enabled": true }
+}

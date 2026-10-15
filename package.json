@@ -1,0 +1,20 @@
+{
+  "name": "sponsor-scout",
+  "version": "0.1.0",
+  "private": true,
+  "description": "An agent that finds brand sponsors whose customers already listen to your podcast, using Qloo taste data.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261015.1",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.4",
+    "wrangler": "^4.151.0"
+  }
+}
