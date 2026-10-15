@@ -52,7 +52,7 @@ Without Qloo the model can only recall brands that sponsor famous shows. With Ql
 
 ## Run it yourself
 
-Requirements: Node.js 20 or newer, a Qloo hackathon API key, a Google AI Studio API key (the free tier is enough), and a Cloudflare account for deployment.
+Requirements: Node.js 22 or newer (Wrangler 4 needs it), a Qloo hackathon API key, a Google AI Studio API key (the free tier is enough), and a Cloudflare account for deployment.
 
 ```sh
 git clone https://github.com/works-on-my-box/sponsor-scout.git
