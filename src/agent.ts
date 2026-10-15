@@ -315,6 +315,12 @@ async function respectFocus(env: Env, focus: string, picks: SponsorPick[], start
 }
 
 // Deterministic shortlist used when the language model is unavailable: Qloo ranking plus brand facts.
+/** The model sometimes lists a brand as "left out" and still picks it; the shortlist wins. */
+export function withoutPicked<T extends { brand: string }>(skipped: T[], picks: SponsorPick[]): T[] {
+  const kept = new Set(picks.map((p) => p.brand.toLowerCase()));
+  return skipped.filter((s) => !kept.has(s.brand.toLowerCase()));
+}
+
 export function fallbackPicks(brands: BrandHit[], n = 8): SponsorPick[] {
   const ads = brands.filter(isLikelyAdvertiser);
   return ads.slice(0, n).map((b) => ({
@@ -454,10 +460,13 @@ export async function runScout(env: Env, input: ScoutInput, emit: Emit): Promise
           if (picks.length >= 3) {
             await emit('step', { tool: fc.name, label: 'Wrote the shortlist', detail: `${picks.length} sponsors in ${new Set(picks.map((p) => p.category)).size} categories` });
             const final = input.focus ? await respectFocus(env, input.focus, picks, modelIndex, state, emit) : picks;
-            const skipped = (Array.isArray(args.skipped) ? args.skipped : [])
-              .slice(0, 4)
-              .map((s: any) => ({ brand: clip(s?.brand_name, 60), reason: clip(s?.reason, 200) }))
-              .filter((s) => s.brand && s.reason);
+            const skipped = withoutPicked(
+              (Array.isArray(args.skipped) ? args.skipped : [])
+                .slice(0, 4)
+                .map((s: any) => ({ brand: clip(s?.brand_name, 60), reason: clip(s?.reason, 200) }))
+                .filter((s) => s.brand && s.reason),
+              final,
+            );
             return {
               podcast,
               audience: state.audience ?? { summary: clip(args.audience_summary, 400), skews: [] },

@@ -1,7 +1,7 @@
 // Unit tests on synthetic data only: Qloo responses must not be stored in this repository.
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mapBrand, isLikelyAdvertiser, BrandHit } from '../src/qloo';
-import { describeAudience, validatePicks, fallbackPicks, applyFocusCheck, focusCheckRequest } from '../src/agent';
+import { describeAudience, validatePicks, fallbackPicks, applyFocusCheck, focusCheckRequest, withoutPicked } from '../src/agent';
 import { parseJsonAnswer } from '../src/gemini';
 import { cleanGuesses } from '../src/baseline';
 import worker, { parseInput } from '../src/index';
@@ -68,6 +68,17 @@ describe('validatePicks', () => {
   it('fills a missing category', () => {
     const { picks } = validatePicks([{ brand_id: 'B2', why: 'w', pitch_angle: 'p' }], { seen });
     expect(picks[0].category).toBe('Other');
+  });
+});
+
+describe('withoutPicked', () => {
+  it('drops a "left out" brand that is also on the shortlist', () => {
+    const picks = fallbackPicks(brands, 5);
+    const skipped = [
+      { brand: 'acme tools', reason: 'Included under Gadgets instead.' },
+      { brand: 'Other Co', reason: 'Too small.' },
+    ];
+    expect(withoutPicked(skipped, picks).map((s) => s.brand)).toEqual(['Other Co']);
   });
 });
 
