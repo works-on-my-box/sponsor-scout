@@ -26,6 +26,8 @@ export interface Evidence {
   // 'audience': rank among brands this show's audience over-indexes on; 'look-alike': rank in the list blended with past sponsors.
   list: 'audience' | 'look-alike';
   signals: string[];
+  // Rank in the first list blended with past sponsors, when the agent asked for one: shows how much the sponsors lift the brand.
+  withLike?: { rank: number; of: number; names: string[] };
   brandType: string[];
   businessModel: string[];
   industries: string[];
@@ -181,6 +183,7 @@ interface Seen {
   of: number;
   list: 'audience' | 'look-alike';
   signals: string[];
+  withLike?: Evidence['withLike'];
 }
 
 interface RunState {
@@ -200,6 +203,7 @@ function toEvidence(s: Seen): Evidence {
     of: s.of,
     list: s.list,
     signals: s.signals,
+    withLike: s.withLike,
     brandType: b.brandType,
     businessModel: b.businessModel,
     industries: b.industries,
@@ -321,8 +325,8 @@ export function withoutPicked<T extends { brand: string }>(skipped: T[], picks: 
   return skipped.filter((s) => !kept.has(s.brand.toLowerCase()));
 }
 
-export function fallbackPicks(brands: BrandHit[], n = 8): SponsorPick[] {
-  const ads = brands.filter(isLikelyAdvertiser);
+export function fallbackPicks(brands: BrandHit[], n = 8, skip = new Set<string>()): SponsorPick[] {
+  const ads = brands.filter((b) => isLikelyAdvertiser(b) && !skip.has(b.id));
   return ads.slice(0, n).map((b) => ({
     brandId: b.id,
     brand: b.name,
@@ -343,6 +347,39 @@ export function fallbackPicks(brands: BrandHit[], n = 8): SponsorPick[] {
       site: b.site,
     },
   }));
+}
+
+// Without the language model the focus can only be matched as words against Qloo's labels:
+// "skip payments and fintech" leaves out brands whose industries start with "financ".
+const FOCUS_SKIP = /\b(?:skip|no|avoid|exclude|excluding|without|except|drop)\s+([^.;!?]+)/gi;
+const FILLER = new Set(['any', 'all', 'the', 'brand', 'brands', 'company', 'companies', 'sponsor', 'sponsors', 'product', 'products', 'please']);
+// Qloo files payments and fintech brands under "Finance" and "Financial ...".
+const ALIAS: Record<string, string> = { fintech: 'financ', payment: 'financ' };
+
+export function focusExclusions(focus: string): string[] {
+  const terms: string[] = [];
+  for (const m of focus.matchAll(FOCUS_SKIP))
+    for (const piece of m[1].split(/,|\/|&|\band\b|\bor\b|\bnor\b/i)) {
+      const words = (piece.toLowerCase().match(/[a-z0-9]+/g) ?? []).filter((w) => !FILLER.has(w));
+      if (!words.length) continue;
+      words.push(words.pop()!.replace(/ies$/, 'y').replace(/(?<![su])s$/, ''));
+      const term = ALIAS[words.join(' ')] ?? words.join(' ');
+      if (term.length >= 3 && !terms.includes(term)) terms.push(term);
+    }
+  return terms;
+}
+
+// Splits brands into kept and left out; a brand is left out when one of its labels starts with a focus term.
+export function matchFocusWords(brands: BrandHit[], terms: string[]) {
+  const patterns = terms.map((t) => new RegExp(`\\b${t}`, 'i'));
+  const kept: BrandHit[] = [];
+  const removed: { id: string; brand: string; label: string }[] = [];
+  for (const b of brands) {
+    const label = [b.name, ...b.industries, ...b.brandType, ...b.businessModel].find((l) => patterns.some((p) => p.test(l)));
+    if (label) removed.push({ id: b.id, brand: b.name, label });
+    else kept.push(b);
+  }
+  return { kept, removed };
 }
 
 function merge(a: { ids: string[]; found: string[]; missing: string[] }, b: { ids: string[]; found: string[]; missing: string[] }) {
@@ -397,8 +434,12 @@ async function runTool(env: Env, input: ScoutInput, state: RunState, name: strin
     if (word) kept = kept.filter((b) => b.industries.some((i) => i.toLowerCase().includes(word)));
     brands.forEach((b, i) => {
       const prev = state.seen.get(b.id);
-      if (!prev) state.seen.set(b.id, { brand: b, rank: i + 1, of: brands.length, list: like.ids.length ? 'look-alike' : 'audience', signals });
-      else for (const sig of signals) if (!prev.signals.includes(sig)) prev.signals.push(sig);
+      const withLike = like.ids.length ? { rank: i + 1, of: brands.length, names: like.found } : undefined;
+      if (!prev) state.seen.set(b.id, { brand: b, rank: i + 1, of: brands.length, list: like.ids.length ? 'look-alike' : 'audience', signals, withLike });
+      else {
+        for (const sig of signals) if (!prev.signals.includes(sig)) prev.signals.push(sig);
+        prev.withLike ??= withLike;
+      }
     });
     const label = like.found.length ? `Found look-alikes of ${like.found.join(', ')}` : 'Pulled brand affinities from Qloo';
     const bits = [`${brands.length} brands`];
@@ -501,10 +542,24 @@ async function fallback(env: Env, input: ScoutInput, state: RunState, emit: Emit
   const banned = new Set(state.past.ids);
   const brands = (state.podcastOnly ?? (await brandAffinities(env, { podcastId: input.podcastId, take: 50 }))).filter((b) => !banned.has(b.id));
   await emit('step', { tool: 'fallback', label: 'Ranked brands without the language model', detail: `${brands.length} brands from Qloo, media and nonprofits set aside` });
+  let skip = new Set<string>();
+  if (input.focus) {
+    const terms = focusExclusions(input.focus);
+    const { removed } = matchFocusWords(brands.filter(isLikelyAdvertiser), terms);
+    skip = new Set(removed.map((r) => r.id));
+    const names = removed.slice(0, 5).map((r) => `${r.brand} (${r.label})`).join(', ') + (removed.length > 5 ? ` and ${removed.length - 5} more` : '');
+    state.notes.push(
+      !terms.length
+        ? 'Without the language model, your focus could not be applied to this list.'
+        : removed.length
+          ? `Without the language model, your focus was matched against Qloo's industry labels and left out ${names}.`
+          : "Without the language model, your focus was matched against Qloo's industry labels; no brand on the list matched it.",
+    );
+  }
   return {
     podcast: { id: input.podcastId, name: input.podcastName },
     audience: state.audience,
-    picks: fallbackPicks(brands),
+    picks: fallbackPicks(brands, 8, skip),
     skipped: [],
     mode: 'fallback',
     notes: state.notes,

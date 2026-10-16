@@ -1,7 +1,7 @@
 // Unit tests on synthetic data only: Qloo responses must not be stored in this repository.
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mapBrand, isLikelyAdvertiser, BrandHit } from '../src/qloo';
-import { describeAudience, validatePicks, fallbackPicks, applyFocusCheck, focusCheckRequest, withoutPicked } from '../src/agent';
+import { describeAudience, validatePicks, fallbackPicks, applyFocusCheck, focusCheckRequest, withoutPicked, focusExclusions, matchFocusWords, runScout } from '../src/agent';
 import { parseJsonAnswer } from '../src/gemini';
 import { cleanGuesses } from '../src/baseline';
 import worker, { parseInput } from '../src/index';
@@ -90,6 +90,35 @@ describe('fallbackPicks', () => {
       ['Widget Co', 4],
     ]);
     expect(picks[0].category).toBe('Gadgets');
+  });
+  it('skips the brands it is told to skip and keeps the real ranks', () => {
+    expect(fallbackPicks(brands, 5, new Set(['B2'])).map((p) => [p.brand, p.evidence.rank])).toEqual([['Widget Co', 4]]);
+  });
+});
+
+describe('focusExclusions', () => {
+  it('turns "skip" and "no" phrases into word stems', () => {
+    expect(focusExclusions('skip payments and fintech')).toEqual(['financ']);
+    expect(focusExclusions('No crypto or gambling brands. Avoid energy drinks')).toEqual(['crypto', 'gambling', 'energy drink']);
+    expect(focusExclusions('no cryptocurrencies, please')).toEqual(['cryptocurrency']);
+  });
+  it('finds nothing to leave out in a focus that only steers', () => {
+    expect(focusExclusions('B2B tools only, prefer developer brands')).toEqual([]);
+  });
+});
+
+describe('matchFocusWords', () => {
+  const pay = mapBrand({ ...raw('Pay Co', 'B7', 0.9, ['Service Brand']), properties: { brand_type: ['Service Brand'], industries: ['Technology', 'Financial Services'] } });
+  it('leaves out brands whose labels start with a term and says which label matched', () => {
+    const { kept, removed } = matchFocusWords([...brands, pay], ['financ', 'widget co']);
+    expect(kept.map((b) => b.id)).toEqual(['B1', 'B2', 'B3']);
+    expect(removed).toEqual([
+      { id: 'B4', brand: 'Widget Co', label: 'Widget Co' },
+      { id: 'B7', brand: 'Pay Co', label: 'Financial Services' },
+    ]);
+  });
+  it('does not match inside a word', () => {
+    expect(matchFocusWords(brands, ['adget']).removed).toEqual([]);
   });
 });
 
@@ -201,5 +230,53 @@ describe('POST /api/baseline', () => {
 
   it('needs a podcast name', async () => {
     expect((await call({}, {})).status).toBe(400);
+  });
+});
+
+describe('runScout', () => {
+  // Synthetic Qloo: the show alone ranks B1, B2, B7, B4; with the past sponsor "Like Co" (L1) added, B7, B2, B6.
+  const payCo = { ...raw('Pay Co', 'B7', 0.95, ['Service Brand']), properties: { brand_type: ['Service Brand'], industries: ['Technology', 'Financial Services'] } };
+  const audience = [raw('Daily Gazette', 'B1', 0.99, ['Media Brand'], ['Advertising']), raw('Acme Tools', 'B2', 0.97, ['Corporate Brand']), payCo, raw('Widget Co', 'B4', 0.93, ['Service Brand'])];
+  const lookAlike = [payCo, raw('Acme Tools', 'B2', 0.96, ['Corporate Brand']), raw('New Co', 'B6', 0.9, ['Product Brand'])];
+  const mockFetch = (gemini: unknown[][] | 'down') =>
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      if (url.hostname === 'generativelanguage.googleapis.com')
+        return gemini === 'down' ? new Response('{}', { status: 429 }) : Response.json({ candidates: [{ content: { parts: gemini.shift() } }] });
+      if (url.pathname === '/search') return Response.json({ results: [{ entity_id: 'L1', name: 'Like Co' }] });
+      if (url.searchParams.get('filter.type') === 'urn:demographics') return Response.json({ results: { demographics: [{ query: { age: {}, gender: {} } }] } });
+      const signal = url.searchParams.get('signal.interests.entities') ?? '';
+      return Response.json({ results: { entities: signal.includes('L1') ? lookAlike : audience } });
+    });
+  const env = { QLOO_API_KEY: 'q', GEMINI_API_KEY: 'g' } as any;
+  const input = (pastSponsors: string[], focus: string) => ({ podcastId: 'P1', podcastName: 'My Show', pastSponsors, focus });
+  afterEach(() => vi.restoreAllMocks());
+
+  it('applies the focus as a word match when the model is down', async () => {
+    mockFetch('down');
+    const r = await runScout(env, input([], 'skip payments and fintech'), () => {});
+    expect(r.mode).toBe('fallback');
+    expect(r.picks.map((p) => [p.brand, p.evidence.rank])).toEqual([['Acme Tools', 2], ['Widget Co', 4]]);
+    expect(r.notes[1]).toBe("Without the language model, your focus was matched against Qloo's industry labels and left out Pay Co (Financial Services).");
+  });
+
+  it('says so when the model is down and the focus has nothing to leave out', async () => {
+    mockFetch('down');
+    const r = await runScout(env, input([], 'prefer B2B tools'), () => {});
+    expect(r.picks.map((p) => p.brand)).toEqual(['Acme Tools', 'Pay Co', 'Widget Co']);
+    expect(r.notes[1]).toBe('Without the language model, your focus could not be applied to this list.');
+  });
+
+  it('records where each brand ranks once the past sponsors are added', async () => {
+    const pick = (brand_id: string) => ({ brand_id, category: 'Tools', why: 'w', pitch_angle: 'p' });
+    mockFetch([
+      [{ functionCall: { name: 'get_brand_affinities', args: {} } }],
+      [{ functionCall: { name: 'submit_shortlist', args: { audience_summary: 's', picks: ['B7', 'B6', 'B2'].map(pick) } } }],
+    ]);
+    const r = await runScout(env, input(['Like'], ''), () => {});
+    expect(r.mode).toBe('agent');
+    const ev = Object.fromEntries(r.picks.map((p) => [p.brandId, p.evidence]));
+    expect(ev.B7).toMatchObject({ list: 'audience', rank: 3, withLike: { rank: 1, of: 3, names: ['Like Co'] } });
+    expect(ev.B6).toMatchObject({ list: 'look-alike', rank: 3, withLike: { rank: 3, of: 3, names: ['Like Co'] } });
   });
 });

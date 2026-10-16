@@ -131,6 +131,13 @@ function chip(text) {
 
 const scoreLabel = (e) => `affinity ${e.affinity.toFixed(2)} · #${e.rank} of ${e.of}${e.list === 'look-alike' ? ' look-alikes' : ''}`;
 
+// Look-alike evidence: where the brand ranks once past sponsors are added as Qloo signals.
+const liftLabel = (e) => {
+  if (!e.withLike) return '';
+  const names = e.withLike.names.join(', ');
+  return e.list === 'look-alike' ? `found via ${names}` : `#${e.withLike.rank} with ${names} (#${e.rank} without)`;
+};
+
 function outreachNote(pick, result) {
   return [
     `Subject: ${result.podcast.name} x ${pick.brand}`,
@@ -187,7 +194,7 @@ function renderResult(r) {
         else angle.remove();
         const facts = card.querySelector('.facts');
         const e = p.evidence;
-        [e.brandType[0], e.businessModel.slice(0, 2).join(' / '), e.keyMarkets.slice(0, 2).join(', '), e.targetAge.slice(0, 2).join(', '), e.signals.length > 1 ? e.signals.slice(1).join(', ') : '']
+        [e.brandType[0], e.businessModel.slice(0, 2).join(' / '), e.keyMarkets.slice(0, 2).join(', '), e.targetAge.slice(0, 2).join(', '), liftLabel(e)]
           .filter(Boolean)
           .forEach((t) => facts.append(chip(t)));
         const copy = card.querySelector('.copy');
